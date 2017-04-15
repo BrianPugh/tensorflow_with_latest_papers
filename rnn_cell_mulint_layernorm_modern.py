@@ -3,27 +3,21 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 import math, numpy as np
-from six.moves import xrange 
+from six.moves import xrange
 import tensorflow as tf
 from multiplicative_integration_modern import multiplicative_integration
-from tensorflow.python.ops.nn import rnn_cell
 import highway_network_modern
 from linear_modern import linear
 import normalization_ops_modern as nom
 from normalization_ops_modern import layer_norm
 
-RNNCell = rnn_cell.RNNCell
-
-
-
-
+RNNCell = tf.contrib.rnn.RNNCell
 
 class GRUCell_MulInt_LayerNorm(RNNCell):
   """Gated Recurrent Unit cell (cf. http://arxiv.org/abs/1406.1078)."""
 
   def __init__(self, num_units):
     self._num_units = num_units
-
 
   @property
   def input_size(self):
@@ -37,7 +31,7 @@ class GRUCell_MulInt_LayerNorm(RNNCell):
   def state_size(self):
     return self._num_units
 
-  def __call__(self, inputs, state, timestep = 0, scope=None):          
+  def __call__(self, inputs, state, timestep = 0, scope=None):
       """Normal Gated recurrent unit (GRU) with nunits cells."""
       with tf.variable_scope(scope or type(self).__name__):  # "GRUCell"
 
@@ -51,10 +45,10 @@ class GRUCell_MulInt_LayerNorm(RNNCell):
 
           hidden_state_concat = layer_norm(hidden_state_concat, num_variables_in_tensor = 2)
 
-          r, u = tf.split(1, 2, tf.sigmoid(
-              multiplicative_integration([inputs_concat,hidden_state_concat], 2*self._num_units, 1.0, weights_already_calculated = True)))
+          r, u = tf.split(tf.sigmoid(
+              multiplicative_integration([inputs_concat,hidden_state_concat], 2*self._num_units, 1.0, weights_already_calculated = True)),2,1)
 
-        with tf.variable_scope("Candidate"): 
+        with tf.variable_scope("Candidate"):
 
           with tf.variable_scope('input_portion'):
             input_portion = layer_norm(linear([inputs], self._num_units, False))
@@ -63,7 +57,7 @@ class GRUCell_MulInt_LayerNorm(RNNCell):
 
           c = tf.tanh(multiplicative_integration([input_portion, reset_portion], self._num_units, 0.0, weights_already_calculated = True))
 
-        new_h = u * state + (1 - u) * c 
+        new_h = u * state + (1 - u) * c
 
       return new_h, new_h
 
@@ -106,7 +100,7 @@ class BasicLSTMCell_MulInt_LayerNorm(RNNCell):
       """
       with tf.variable_scope(scope or type(self).__name__):  # "BasicLSTMCell"
         # Parameters of gates are concatenated into one multiply for efficiency.
-        h, c = tf.split(1, 2, state)
+        h, c = tf.split(state,2,1)
 
         '''note that bias is set to 0 because batch norm bias is added later'''
         with tf.variable_scope('inputs_weight_matrix'):
@@ -118,11 +112,10 @@ class BasicLSTMCell_MulInt_LayerNorm(RNNCell):
           h_concat = linear([h], 4 * self._num_units, False)
           h_concat = layer_norm(h_concat,num_variables_in_tensor = 4, scope = "h_concat_layer_norm")
 
-        i, j, f, o = tf.split(1, 4, 
-          multiplicative_integration([inputs_concat,h_concat], 4*self._num_units, 0.0, weights_already_calculated = True))
+        i, j, f, o = tf.split(multiplicative_integration([inputs_concat,h_concat], 4*self._num_units, 0.0, weights_already_calculated = True),4,1)
 
         new_c = c * tf.sigmoid(f + self._forget_bias) + tf.sigmoid(i) * tf.tanh(j)
-        
+
         '''apply layer norm to the hidden state transition'''
         with tf.variable_scope('layer_norm_hidden_state'):
           new_h = tf.tanh(layer_norm(new_c)) * tf.sigmoid(o)
